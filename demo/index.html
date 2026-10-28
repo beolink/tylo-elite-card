@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tylö Elite card demo</title>
+<style>
+  :root { color-scheme: light dark; --primary-text-color: #e1e1e1; }
+  body { margin: 0; padding: 24px 16px; background: #1c1c1c; color: #ddd; font: 14px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 16px; font-weight: 500; margin: 0 0 4px; }
+  p { margin: 0 0 18px; color: #999; }
+  .row { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .slot { width: 360px; max-width: 100%; }
+  .slot.narrow { width: 250px; }
+  .slot h2 { font-size: 12px; font-weight: 500; color: #888; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+  #log { margin-top: 24px; font: 12px ui-monospace, monospace; color: #9c9; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+  .tools { margin: 0 0 18px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .tools button { background: #333; color: #ddd; border: 1px solid #555; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  body.shot { min-height: 100vh; box-sizing: border-box; padding: 36px 40px; background: linear-gradient(180deg, #d9cbb8, #c4ae92); }
+  body.shot .row { gap: 36px; flex-wrap: nowrap; }
+  body.shot .slot { width: 300px; }
+</style>
+</head>
+<body>
+<h1>Tylö Elite card</h1>
+<p>A simulated sauna: the ESPHome sauna360 entities of a Combi Elite, heating while on. Service calls and events are logged below.</p>
+<div class="tools">
+  <button id="offline">Toggle connection</button>
+  <button id="fast">Heat fast</button>
+</div>
+<div class="row">
+  <div class="slot"><h2>ESPHome, discovered, Swedish</h2><div id="a"></div></div>
+  <div class="slot"><h2>Switch + helpers, English, no bezel</h2><div id="b"></div></div>
+  <div class="slot narrow"><h2>Narrow, German</h2><div id="c"></div></div>
+</div>
+<div id="log"></div>
+
+<script>
+  // a stand-in for Home Assistant's ha-card
+  customElements.define("ha-card", class extends HTMLElement {
+    connectedCallback() { this.style.display = "block"; }
+  });
+</script>
+<script type="module">
+  import "../dist/tylo-elite-card.js";
+
+  const log = (msg) => {
+    const el = document.getElementById("log");
+    if (!el) return;
+    el.textContent = `${new Date().toLocaleTimeString()} ${msg}\n` + el.textContent;
+  };
+
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const S = (entity_id, state, attributes = {}) => ({ entity_id, state: String(state), attributes, last_changed: iso(now), last_updated: iso(now) });
+
+  let states = {};
+  const put = (s) => { states[s.entity_id] = s; };
+  // the ESPHome device "tylo" (models/combi_elite.yaml)
+  put(S("climate.tylo_sauna_climate", "off", { hvac_modes: ["off", "heat"], min_temp: 40, max_temp: 110, target_temp_step: 1,
+    current_temperature: 23, temperature: 80, hvac_action: "off", friendly_name: "tylo Sauna Climate", supported_features: 1 }));
+  put(S("sensor.tylo_current_temperature", 23, { unit_of_measurement: "°C", device_class: "temperature", friendly_name: "tylo Current Temperature" }));
+  put(S("sensor.tylo_setting_temperature", 80, { unit_of_measurement: "°C", friendly_name: "tylo Setting Temperature" }));
+  put(S("number.tylo_bath_temperature", 80, { min: 40, max: 110, step: 1, mode: "box", unit_of_measurement: "°C", friendly_name: "tylo Bath Temperature" }));
+  put(S("number.tylo_max_bath_temperature", 110, { min: 40, max: 110, step: 1, unit_of_measurement: "°C", friendly_name: "tylo Max Bath Temperature" }));
+  put(S("sensor.tylo_max_bath_temperature", 110, { unit_of_measurement: "°C", friendly_name: "tylo Max Bath Temperature" }));
+  put(S("number.tylo_bath_time", 180, { min: 1, max: 360, step: 1, unit_of_measurement: "min", friendly_name: "tylo Bath Time" }));
+  put(S("sensor.tylo_setting_bath_time", 180, { unit_of_measurement: "min", friendly_name: "tylo Setting Bath Time" }));
+  put(S("sensor.tylo_remaining_time", 0, { unit_of_measurement: "min", device_class: "duration", friendly_name: "tylo Remaining Time" }));
+  put(S("switch.tylo_light", "off", { friendly_name: "tylo Light" }));
+  put(S("switch.tylo_heater", "off", { friendly_name: "tylo Heater" }));
+  put(S("binary_sensor.tylo_heater_state", "off", { friendly_name: "tylo Heater State" }));
+  put(S("binary_sensor.tylo_light_state", "off", { friendly_name: "tylo Light State" }));
+  put(S("binary_sensor.tylo_ready_state", "off", { friendly_name: "tylo Ready State" }));
+  put(S("number.tylo_humidity", 30, { min: 0, max: 100, step: 1, unit_of_measurement: "%", friendly_name: "tylo Humidity" }));
+  put(S("sensor.tylo_setting_humidity", 30, { unit_of_measurement: "%", friendly_name: "tylo Setting Humidity" }));
+  put(S("sensor.tylo_water_tank_level", 85, { unit_of_measurement: "%", friendly_name: "tylo Water Tank Level" }));
+  put(S("sensor.tylo_heating_element", "Off", { friendly_name: "tylo Heating Element" }));
+  put(S("sensor.tylo_total_uptime", 51840, { unit_of_measurement: "min", friendly_name: "tylo Total Uptime" }));
+  put(S("sensor.tylo_tylo_wifi_signal", -61, { unit_of_measurement: "dBm", friendly_name: "tylo tylo WiFi Signal" }));
+  // a humidity sensor in the sauna, and the aroma pumps, outside the device
+  put(S("sensor.bastu_luftfuktighet", 14, { unit_of_measurement: "%", device_class: "humidity", friendly_name: "Bastu luftfuktighet" }));
+  put(S("switch.bastu_lavendel", "on", { friendly_name: "Lavendel" }));
+  put(S("switch.bastu_eukalyptus", "off", { friendly_name: "Eukalyptus" }));
+  put(S("schedule.bastu_helg", "off", { friendly_name: "Bastu helg", next_event: iso(now + 26 * 3600e3) }));
+  put(S("automation.bastu_fredag", "on", { friendly_name: "Bastu fredag kväll", last_triggered: iso(now - 4 * 86400e3) }));
+  // a plainer sauna: a switch, a temperature sensor, helpers, a timer
+  put(S("switch.bastu_aggregat", "off", { friendly_name: "Bastuaggregat" }));
+  put(S("sensor.bastu_temperatur", 21, { unit_of_measurement: "°C", friendly_name: "Bastu temperatur" }));
+  put(S("input_number.bastu_mal", 75, { min: 40, max: 100, step: 5, unit_of_measurement: "°C", friendly_name: "Bastu måltemperatur" }));
+  put(S("input_number.bastu_tid", 1.5, { min: 0.5, max: 6, step: 0.5, unit_of_measurement: "h", friendly_name: "Bastu badtid" }));
+  put(S("timer.bastu", "idle", { duration: "1:30:00", friendly_name: "Bastu timer" }));
+  put(S("light.bastu_tak", "on", { friendly_name: "Bastu tak" }));
+
+  const device = { id: "dev_tylo", name: "tylo", name_by_user: null };
+  const entities = {};
+  for (const id of Object.keys(states)) {
+    entities[id] = { entity_id: id, device_id: id.includes(".tylo_") ? device.id : null };
+  }
+  const devices = { [device.id]: device };
+
+  const userData = {};
+  let offline = false;
+  let fast = false;
+
+  function formatEntityState(s) {
+    const u = s.attributes.unit_of_measurement;
+    if (s.state === "on") return "På";
+    if (s.state === "off") return "Av";
+    return u ? `${s.state} ${u}` : s.state;
+  }
+
+  function set(id, state, attrs) {
+    const old = states[id];
+    states = { ...states, [id]: { ...old, state: String(state), attributes: { ...old.attributes, ...(attrs || {}) }, last_updated: iso(Date.now()) } };
+  }
+
+  async function callService(domain, service, data) {
+    log(`callService ${domain}.${service} ${JSON.stringify(data)}`);
+    await new Promise((r) => setTimeout(r, 250));
+    const id = data.entity_id;
+    if (offline && id.includes("tylo")) throw new Error("tylo is offline");
+    if (service === "set_value") set(id, data.value);
+    else if (domain === "climate" && service === "set_temperature") { set(id, states[id].state, { temperature: data.temperature }); set("number.tylo_bath_temperature", data.temperature); }
+    else if (domain === "climate" && service === "set_hvac_mode") {
+      set(id, data.hvac_mode);
+      set("switch.tylo_heater", data.hvac_mode === "off" ? "off" : "on");
+      set("sensor.tylo_remaining_time", data.hvac_mode === "off" ? 0 : Number(states["number.tylo_bath_time"].state));
+    }
+    else if (service === "turn_on" || service === "turn_off") {
+      set(id, service === "turn_on" ? "on" : "off");
+      if (id === "switch.bastu_aggregat") {
+        if (service === "turn_on") set("timer.bastu", "active", { finishes_at: iso(Date.now() + Number(states["input_number.bastu_tid"].state) * 3600e3) });
+        else set("timer.bastu", "idle", { finishes_at: undefined });
+      }
+    }
+    if (id === "number.tylo_bath_temperature") set("climate.tylo_sauna_climate", states["climate.tylo_sauna_climate"].state, { temperature: data.value });
+    publish();
+  }
+
+  async function callWS(msg) {
+    log(`callWS ${JSON.stringify(msg)}`);
+    if (msg.type === "frontend/get_user_data") return { value: userData[msg.key] ?? null };
+    if (msg.type === "frontend/set_user_data") { userData[msg.key] = msg.value; return null; }
+    throw new Error("unknown command");
+  }
+
+  const cards = [];
+  function hassFor(lang) {
+    return { states, entities, devices, config: { time_zone: "Europe/Stockholm", unit_system: { temperature: "°C" } },
+             locale: { language: lang, time_format: "24" }, language: lang, callService, callWS, formatEntityState };
+  }
+  function publish() { for (const { el, lang } of cards) el.hass = hassFor(lang); }
+
+  function mount(slot, lang, config) {
+    const el = document.createElement("tylo-elite-card");
+    el.setConfig(config);
+    el.hass = hassFor(lang);
+    document.getElementById(slot).appendChild(el);
+    cards.push({ el, lang });
+    for (const ev of ["hass-more-info", "hass-notification", "haptic"]) el.addEventListener(ev, (e) => log(`${ev} ${JSON.stringify(e.detail)}`));
+    return el;
+  }
+
+  mount("a", "sv", {
+    type: "custom:tylo-elite-card", entity: "climate.tylo_sauna_climate", name: "Bastun",
+    entities: { humidity: "sensor.bastu_luftfuktighet" },
+    toggles: ["switch.bastu_lavendel", { entity: "switch.bastu_eukalyptus", name: "Eukalyptus" }],
+    favorites: [{ name: "Kvällsbad", temperature: 85, humidity: 20, bath_time: 120, light: true, toggles: { "switch.bastu_lavendel": true } }],
+    schedule: ["schedule.bastu_helg", "automation.bastu_fredag"],
+  });
+  mount("b", "en", {
+    type: "custom:tylo-elite-card", entity: "switch.bastu_aggregat", name: "Sauna", hide_bezel: true,
+    entities: { temperature: "sensor.bastu_temperatur", target_temperature: "input_number.bastu_mal",
+                bath_time: "input_number.bastu_tid", remaining_time: "timer.bastu", light: "light.bastu_tak" },
+    time_step: 30,
+  });
+  mount("c", "de", { type: "custom:tylo-elite-card", entity: "climate.tylo_sauna_climate" });
+
+  // the sauna heats while on, and cools while off
+  setInterval(() => {
+    const on = states["switch.tylo_heater"].state === "on";
+    const t = Number(states["sensor.tylo_current_temperature"].state);
+    const target = Number(states["number.tylo_bath_temperature"].state);
+    const rate = fast ? 6 : 0.4;
+    let next = on ? Math.min(target, t + rate) : Math.max(22, t - 0.3);
+    next = Math.round(next * 10) / 10;
+    if (!offline) {
+      set("sensor.tylo_current_temperature", next);
+      set("climate.tylo_sauna_climate", states["climate.tylo_sauna_climate"].state, { current_temperature: next, hvac_action: on && next < target ? "heating" : on ? "idle" : "off" });
+      set("binary_sensor.tylo_heater_state", on && next < target ? "on" : "off");
+      set("binary_sensor.tylo_ready_state", on && next >= target - 1 ? "on" : "off");
+      set("sensor.bastu_luftfuktighet", on ? Math.min(Number(states["number.tylo_humidity"].state), Number(states["sensor.bastu_luftfuktighet"].state) + 0.5) : 14);
+      const st = Number(states["sensor.bastu_temperatur"].state);
+      const sOn = states["switch.bastu_aggregat"].state === "on";
+      set("sensor.bastu_temperatur", Math.round((sOn ? Math.min(Number(states["input_number.bastu_mal"].state), st + rate) : Math.max(20, st - 0.3)) * 10) / 10);
+      publish();
+    }
+  }, 1000);
+
+  document.getElementById("offline").onclick = () => {
+    offline = !offline;
+    for (const id of Object.keys(states)) if (id.includes(".tylo_")) set(id, offline ? "unavailable" : id.startsWith("climate.") ? (states["switch.tylo_heater"]?.state === "on" ? "heat" : "off") : states[id].state);
+    if (!offline) location.reload();
+    publish();
+  };
+  document.getElementById("fast").onclick = () => { fast = !fast; };
+  window.__demo = { get states() { return states; }, userData, cards };
+
+  // ?shot: the README's picture, three screens of one heating sauna, nothing moving
+  if (new URLSearchParams(location.search).has("shot")) {
+    fast = false;
+    offline = true;   // stops the simulation
+    for (const [id, st, attrs] of [
+      ["climate.tylo_sauna_climate", "heat", { current_temperature: 72, hvac_action: "heating" }],
+      ["switch.tylo_heater", "on"], ["binary_sensor.tylo_heater_state", "on"], ["switch.tylo_light", "on"],
+      ["sensor.tylo_current_temperature", 72], ["sensor.bastu_luftfuktighet", 18], ["sensor.tylo_remaining_time", 134],
+    ]) set(id, st, attrs);
+    userData["tylo-elite-card"] = { favorites: { "climate.tylo_sauna_climate": [
+      { name: "Lördagsbastu", temperature: 90, humidity: 10, bath_time: 180, light: true, toggles: { "switch.bastu_eukalyptus": true } }] } };
+    document.body.classList.add("shot");
+    document.querySelector("h1").remove();
+    document.querySelector("p").remove();
+    document.querySelector(".tools").remove();
+    document.getElementById("log").remove();
+    const row = document.querySelector(".row");
+    row.innerHTML = '<div class="slot" id="s1"></div><div class="slot" id="s2"></div><div class="slot" id="s3"></div>';
+    cards.length = 0;
+    const cfg = {
+      type: "custom:tylo-elite-card", entity: "climate.tylo_sauna_climate",
+      entities: { humidity: "sensor.bastu_luftfuktighet" },
+      toggles: ["switch.bastu_lavendel", { entity: "switch.bastu_eukalyptus", name: "Eukalyptus" }],
+      favorites: [{ name: "Kvällsbad", temperature: 85, humidity: 20, bath_time: 120, light: true, toggles: { "switch.bastu_lavendel": true } }],
+      schedule: ["schedule.bastu_helg"],
+    };
+    const tabs = ["home", "settings", "favorites"];
+    tabs.forEach((tab, i) => {
+      const el = mount("s" + (i + 1), "sv", cfg);
+      setTimeout(() => el._act("tab:" + tab), 300);
+    });
+  }
+</script>
+</body>
+</html>
